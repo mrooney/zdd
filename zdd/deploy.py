@@ -207,7 +207,7 @@ def deploy(config_file):
 
     # Spawn new services
     for service in services:
-        if service.previous_pid is None or service.fixedport is None:
+        if service.fixedport is None or service.previous_pid is None:
             print "Starting new", service.name
             service.start()
 
