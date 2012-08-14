@@ -1,6 +1,6 @@
 from __future__ import with_statement
 
-from ConfigParser import SafeConfigParser, Error as ConfigParserError
+from ConfigParser import SafeConfigParser, NoOptionError, Error as ConfigParserError
 from optparse import OptionParser
 import os
 import signal
@@ -63,6 +63,10 @@ class Service(object):
         self.start_cmd = config.get(section, "start")
         self.stop_cmd = config.get(section, "stop")
         try:
+            self.fixedport = config.getint(section, "port")
+        except NoOptionError:
+            self.fixedport = None
+        try:
             self.cwd = config.get_path(section, "cwd")
         except ConfigParserError:
             self.cwd = config.config_dir
@@ -90,7 +94,11 @@ class Service(object):
         if not pid:
             return
 
-        port = read_port(os.path.dirname(self.pid_file), pid)
+        if self.fixedport is not None:
+            port = self.fixedport
+        else:
+            port = read_port(os.path.dirname(self.pid_file), pid)
+
         if not port:
             return
 
@@ -136,6 +144,7 @@ class Nginx(object):
         """Render nginx.conf template into nginx.conf"""
 
         replacements['nginx_pid_filename'] = self.pid_file
+        replacements['project_dir'] = os.path.abspath(os.path.dirname(self.template))
 
         with file(self.template, 'r') as template_file:
             template_content = template_file.read()
@@ -182,10 +191,11 @@ def move_old_pidfiles(services):
 
         write_int_file(service.previous_pid_filename, pid)
 
-        try:
-            os.unlink(service.pid_file)
-        except OSError:
-            pass
+        if service.fixedport is None:
+            try:
+                os.unlink(service.pid_file)
+            except OSError:
+                pass
 
 def deploy(config_file):
     config = DeployConfigParser()
@@ -197,8 +207,9 @@ def deploy(config_file):
 
     # Spawn new services
     for service in services:
-        print "Starting new", service.name
-        service.start()
+        if service.previous_pid is None or service.fixedport is None:
+            print "Starting new", service.name
+            service.start()
 
     # Wait for new services to spin up, and save their pids
     replacements = {}
@@ -225,7 +236,7 @@ def deploy(config_file):
 
     # stop old processes
     for service in services:
-        if service.previous_pid is not None:
+        if service.previous_pid is not None and service.fixedport is None:
             print "Stopping previous instance of %s, process %s." % (service.name, service.previous_pid)
             service.stop(service.previous_pid)
 
